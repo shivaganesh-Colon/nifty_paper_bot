@@ -1,0 +1,18 @@
+# --- secrets: NEVER upload ---
+config.py
+access_token.json
+*.token
+.env
+
+# --- market data & logs (big / personal) ---
+data/
+logs/
+sim_output/
+test_output/
+*.zip
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/

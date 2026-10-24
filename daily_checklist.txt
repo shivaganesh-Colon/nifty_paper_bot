@@ -1,0 +1,103 @@
+NIFTY PAPER BOT - DAILY CHECKLIST & TEST LIST
+=============================================
+Folder: C:\Users\chait\nifty_paper_bot
+Everything is PAPER trading - no real money until a strategy proves itself for weeks.
+
+
+A) EVERY MORNING (before 9:15)
+------------------------------
+ 1. 9:00  python login.py                    (Zerodha login, paste request_token)
+ 2. 9:03  python tick_recorder.py --check    (should end: "All checks passed")
+ 3. 9:05  Window 1:  python bot.py           (Supertrend paper bot)
+ 4. 9:07  Window 2:  python tick_recorder.py (order-flow recorder + Telegram alerts)
+ Laptop: plugged in, never sleep, internet on. Do not close either window.
+
+
+B) DURING THE DAY (optional notes)
+----------------------------------
+ Write down the TIME and WHAT HAPPENED NEXT for moments like:
+  - 🔥 explosive candle / ⭐ high-probability signal
+  - 🧱 big volume, small move (big buyer/seller sitting) - did the level hold or break?
+  - ⚠️ SIDEWAYS / ⚠️ BE CAREFUL warnings - were they right?
+  - Price far from Supertrend line, then pullback near the line - did the trend restart?
+  - Any trade you WOULD have taken (CE/PE, time, why) - paper only
+
+
+C) EVERY DAY AFTER MARKET CLOSE (after 15:31)
+---------------------------------------------
+ 1. Check both windows have stopped (bot at 15:15, recorder at 15:31; Ctrl+C if needed)
+ 2. Run:  python report.py      -> note Supertrend P&L of the day
+ 3. Check these files exist for today (date = YYYY-MM-DD):
+      data\ticks_DATE.csv        <- MOST IMPORTANT (every tick, order flow)
+      data\footprint_DATE.csv
+      data\signals_DATE.csv
+      data\predictions_DATE.csv
+      data\chain_DATE.csv        (option chain, OI walls, premiums)
+      logs\trades.csv            (all Supertrend paper trades so far)
+ 4. If something broke during the day: screenshot the error, send to Claude.
+ 5. Keep all files - do NOT delete. Back them up (pen drive / Google Drive) once a week.
+
+
+D) EVERY 10-15 TRADING DAYS -> SEND TO CLAUDE
+----------------------------------------------
+ - All data\ticks_*.csv   (zip them: right-click -> Send to -> Compressed folder)
+ - All data\chain_*.csv
+ - logs\trades.csv
+ - Your notes from section B
+
+
+E) WHAT CLAUDE WILL TEST WITH THE COLLECTED DATA
+------------------------------------------------
+ SUPERTREND BOT
+  [ ] Supertrend daily results: win rate, avg win/loss, worst day
+  [ ] Late entries: Supertrend flip after a long move (like 23 Oct 13:45 CE) - skip them?
+  [ ] Order flow as a filter for Supertrend entries (skip when order flow warns?)
+
+ SUPERTREND + ORDER FLOW TOGETHER
+  [ ] Take order-flow signals ONLY in Supertrend direction (green=CE, red=PE)
+  [ ] Exception: explosive candle AGAINST Supertrend (start of a new trend?)
+  [ ] Near vs far from Supertrend line: entry when price pulls back NEAR the line
+      and delta turns back WITH the trend (looked good on 23 Oct: +12 pts / 10 min)
+  [ ] Far from line = do not chase (pullback 30-40 pts is normal)
+
+ ORDER-FLOW ALERTS
+  [ ] ⭐ Explosive candle signal (delta 5x+ AND big candle): win rate, points
+  [ ] 🧱 Big volume, small move: does price break AWAY from the wall? which way?
+  [ ] ⚠️ SIDEWAYS: are signals inside sideways really worse? (23 Oct: yes)
+  [ ] ⚠️ BE CAREFUL (150+ pt move without pullback): useful or blocks winners?
+  [ ] Breakout vs reversal signals: which works better, at which levels
+  [ ] Strong levels (prev-day high/low, POC/VAH/VAL, OI walls) vs weak levels
+  [ ] Equal lows/highs (same price 3+ times): sweep & reclaim vs hard break
+  [ ] Slow divergence (cum delta vs price over 30-60 min) as day bias
+
+ TIMING & EXECUTION
+  [ ] 1-min vs 3-min vs 5-min candles for each rule
+  [ ] Results by time window (9:15-11, 11-13, 13-15:30) and by market type
+      (trend / sideways / spike)
+  [ ] Entry 30 seconds after alert (real reaction time) vs at candle close
+  [ ] Entry at 30-35% pullback of explosive candle vs at close
+  [ ] Trailing stop: 40 behind after +50 vs other settings
+  [ ] Real option premiums (from chain files) instead of estimates
+
+ RULE OF THUMB (from tests so far)
+  - Trade WITH the trend. Against the trend lost money in every test.
+  - Avoid zones where big players sit (high volume, price not moving).
+  - Enter when the wall breaks / after a pullback - not after a long move.
+  - Most single-candle guesses = 50% (coin toss). Only situations at levels matter.
+  - Every idea must beat option costs (~7 NIFTY pts per trade) to be worth it.
+
+
+F) PARKED IDEAS (test later, after options strategy works)
+----------------------------------------------------------
+  [ ] Stock BTST: top-volume stocks under Rs 100, green candle, check 1-min
+      buying near 3 PM, buy at close, sell next day at fixed target, else exit at
+      close. (fetch_stocks.py is ready - run only when we start this.)
+
+
+G) ALREADY TESTED - DID NOT WORK ON NIFTY (no need to retest)
+--------------------------------------------------------------
+  Price-action reversals (V-shape, double top/bottom), candle patterns, morning-only
+  scalps, ORB, staircase, 21 MA crossover, regime switching, candle colour,
+  1-min scalping (1,440 settings), FVG (ICT), order blocks, fading price far from
+  Supertrend, Supertrend re-entry, faster Supertrend (10,3), 5-pt trailing,
+  late start (9:45), big-candle skip filters.

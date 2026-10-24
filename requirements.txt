@@ -1,0 +1,3 @@
+kiteconnect>=5.0
+tzdata
+requests
