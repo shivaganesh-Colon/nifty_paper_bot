@@ -79,6 +79,19 @@ E) WHAT CLAUDE WILL TEST WITH THE COLLECTED DATA
   [ ] Trailing stop: 40 behind after +50 vs other settings
   [ ] Real option premiums (from chain files) instead of estimates
 
+ NEW IDEAS (added 24-25 Oct, Friday-only results so far)
+  [ ] Pivot P side filter: CE only above P, PE only below P
+      (Friday: order-flow signals -3,658 -> +820; year Supertrend +31k -> +34k)
+  [ ] Pivot P + large trades not against us (Friday best: +1,291, 7 signals)
+  [ ] Large trade detector (ticks >= 75 lots): big BUY prints often failed on Friday
+  [ ] OI buildup (long/short buildup, covering, unwinding) - test only from 28 Oct,
+      expiry-week rollover distorts OI
+  [ ] Order book imbalance (total buy vs sell qty waiting) - low priority
+  [ ] Ratio below 2x -> next candle opposite? (Friday 56-57%, moves too small)
+  [ ] Real VWAP (from ticks) as filter - did not help on year test or Friday
+  [ ] Show index candle next to futures candle in alerts (avoid colour confusion)
+  [ ] Daily order-flow chart page per recorded day (like the 23 Oct chart)
+
  RULE OF THUMB (from tests so far)
   - Trade WITH the trend. Against the trend lost money in every test.
   - Avoid zones where big players sit (high volume, price not moving).
