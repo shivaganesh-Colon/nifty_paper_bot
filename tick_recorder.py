@@ -48,6 +48,9 @@ import orderflow
 IST = ZoneInfo("Asia/Kolkata")
 STOP_AT = "15:31"
 SPOT_TOKEN = 256265          # NSE:NIFTY 50 index (for spot price / futures premium)
+# One tick bigger than this is a block / calendar-spread (rollover) trade or a reconnect jump,
+# not normal aggressive buying/selling - it is saved but NOT counted in delta (26 Oct: 514,475 qty)
+BLOCK_QTY = getattr(C, "OF_BLOCK_QTY", 100000)
 # Send each 1-min candle's buy/sell/delta to Telegram (set FOOTPRINT_TELEGRAM = False in config.py to stop)
 FOOTPRINT_TELEGRAM = getattr(C, "FOOTPRINT_TELEGRAM", True)
 
@@ -85,6 +88,43 @@ def prev_day_hl(kite, fut_token):
     return []
 
 
+def day_pivots(kite):
+    """Classic pivots (spot) from the previous day's NIFTY 50 high / low / close."""
+    try:
+        from datetime import timedelta
+        rows = kite.historical_data(SPOT_TOKEN, date.today() - timedelta(days=10), date.today(), "day")
+        rows = [r for r in rows if r["date"].date() < date.today()] if rows else []
+        if rows:
+            r = rows[-1]
+            H, L, Cl = r["high"], r["low"], r["close"]
+            P = (H + L + Cl) / 3
+            return {"R2": P + H - L, "R1": 2 * P - L, "P": P, "S1": 2 * P - H, "S2": P - H + L}, (H, L, Cl)
+    except Exception as e:
+        print(f"(could not load pivots: {e})")
+    return {}, None
+
+
+def live_premium(kite, fut_symbol):
+    try:
+        q = kite.quote(["NSE:NIFTY 50", f"NFO:{fut_symbol}"])
+        return q[f"NFO:{fut_symbol}"]["last_price"] - q["NSE:NIFTY 50"]["last_price"]
+    except Exception:
+        return None
+
+
+def map_text(piv, static, premium):
+    """Morning message: all key levels, spot and futures, sorted top to bottom."""
+    rows = [(v, f"Pivot {k}", True) for k, v in piv.items()]
+    rows += [(p - (premium or 0), n, False) for p, n in static]
+    rows.sort(key=lambda r: -r[0])
+    out = ["🗺 TODAY'S LEVELS (spot | futures)" + (f"  premium ≈ {premium:+.0f}" if premium is not None else "")]
+    for spot_v, name, _ in rows:
+        fut = f"{spot_v + premium:,.0f}" if premium is not None else "-"
+        mark = "  ← dividing line (above = CE side, below = PE side)" if name == "Pivot P" else ""
+        out.append(f"{spot_v:,.0f} | {fut}  {name}{mark}")
+    return "\n".join(out)
+
+
 def replay_today(path, flow, state):
     """After a restart: replay today's saved ticks so cumulative delta, levels, guesses and
     signal limits continue from where they were (nothing is re-sent to Telegram)."""
@@ -102,7 +142,7 @@ def replay_today(path, flow, state):
             c = candles[m]
             c["h"], c["l"], c["c"] = max(c["h"], px), min(c["l"], px), px
             q = int(float(r.get("qty") or 0))
-            if q and r.get("side") in ("BUY", "SELL"):
+            if q and q <= BLOCK_QTY and r.get("side") in ("BUY", "SELL"):
                 lvl = c["fp"].setdefault(px, [0, 0])
                 lvl[1 if r["side"] == "BUY" else 0] += q
     if not order:
@@ -162,6 +202,11 @@ def main():
                      "exit_time", "exit", "fut_points", "est_rs_per_lot", "result", "held_min"])
     static = prev_day_hl(kite, fut_token) + orderflow.prev_day_levels("data", today)
     flow = orderflow.Flow(fut_symbol, static, "data", today)
+    piv, _hlc = day_pivots(kite)
+    flow.pivots = piv                       # display only (not used for signals)
+    premium = live_premium(kite, fut_symbol)
+    morning_map = map_text(piv, static, premium)
+    print(morning_map)
 
     def log_guess(row):
         pw.writerow(row)
@@ -209,8 +254,8 @@ def main():
 
     tg = alerts.Telegram.from_config() if FOOTPRINT_TELEGRAM else None
     if tg and tg.enabled:
-        tg.send(f"🎙 Order-flow recorder started ({fut_symbol}) - one message per 1-min candle"
-                + ("\nKey levels: " + ", ".join(f"{n} {p:,.1f}" for p, n in static) if static else ""))
+        tg.send(f"🎙 Order-flow recorder started ({fut_symbol}) - one message per 1-min candle")
+        tg.send(morning_map)
 
     kws = KiteTicker(C.API_KEY, token)
 
@@ -236,7 +281,10 @@ def main():
                 safe_close()
                 state.update({"min": minute, "fp": {}, "o": price, "h": price, "l": price})
             state["h"], state["l"], state["c"] = max(state["h"], price), min(state["l"], price), price
-            if qty:
+            if qty > BLOCK_QTY:
+                print(f"   (ignored block/spread trade {qty:,} qty at {price} - not counted in delta)")
+                side = "BLOCK"
+            elif qty:
                 # compare with the order book just BEFORE this trade
                 if state["ask"] is not None and price >= state["ask"]:
                     side, state["delta"] = "BUY", state["delta"] + qty
@@ -341,7 +389,10 @@ def _fake_run(minutes=40, telegram=False):
                      "instrument_token": 9, "tradingsymbol": "NIFTYTESTFUT"}]
 
         def historical_data(self, *a):
-            return [{"date": real_dt(2026, 10, 21), "high": 22720.0, "low": 22640.0}]
+            return [{"date": real_dt(2026, 10, 21), "high": 22720.0, "low": 22640.0, "close": 22690.0}]
+
+        def quote(self, keys):
+            return {k: {"last_price": 22700.0 if "FUT" in k else 22650.0} for k in keys}
 
     class FakeTicker:
         MODE_FULL = "full"

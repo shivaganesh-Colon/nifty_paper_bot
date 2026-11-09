@@ -226,7 +226,7 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
     if prev:
         log.info("Previous day: high %.0f  low %.0f  close %.0f", prev["high"], prev["low"], prev["close"])
     tg.send(alerts.start_msg(expiry, lot_size))
-    st_hist = m.history(today, STM.ST_WARMUP_DAYS) if STM.ST_ENABLED else []
+    st_hist = m.history(today, STM.ST_WARMUP_DAYS) if (STM.ST_ENABLED or STM.TOUCH_ENABLED) else []
     log.info("Supertrend(%s,%s) paper strategy: %s (%d warm-up candles)", STM.ST_PERIOD, STM.ST_MULT,
              "ON" if STM.ST_ENABLED else "off", len(st_hist))
 
@@ -236,6 +236,14 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
     st_start_t, st_last_t = at(STM.ST_START), at(STM.ST_LAST_ENTRY)
     st = {"trade": None, "pnl": 0.0, "n": 0,     # Supertrend has its own position slot
           "last_dir": None, "first_done": False, "best": 0.0, "sl": None}
+    # Supertrend TOUCH setup: its own slot too (5-min Supertrend(10,3) line touch, morning only)
+    tc = {"trade": None, "pnl": 0.0, "n": 0, "dir": None, "line": None,
+          "armed": False, "touches": 0}
+    tc_start_t, tc_last_t = at(STM.TOUCH_START), at(STM.TOUCH_LAST_ENTRY)
+    if STM.TOUCH_ENABLED:
+        log.info("Supertrend TOUCH paper setup: ON (5-min Supertrend(%s,%s), entries %s-%s, "
+                 "touch #1-#%d, max %d/day)", STM.TOUCH_PERIOD, STM.TOUCH_MULT, STM.TOUCH_START,
+                 STM.TOUCH_LAST_ENTRY, STM.TOUCH_MAX_PER_TREND, STM.TOUCH_MAX_TRADES)
     while clock.now() < open_t:
         clock.sleep(min(30, (open_t - clock.now()).total_seconds()))
 
@@ -293,6 +301,34 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
         st["sl"] = spot_now - sgn * STM.ST_STOP_POINTS if STM.ST_STOP_POINTS else None
         tg.send(alerts.st_entry_msg(t, line))
 
+    def tc_close(reason):
+        t = tc["trade"]
+        q = m.quote([C.SPOT_SYMBOL, opt_key(t)])
+        bid, ask, ltp = best_prices(q.get(opt_key(t), {}))
+        book.close(t, clock.now(), q[C.SPOT_SYMBOL]["last_price"], bid, ltp, reason)
+        net = book.record(t)
+        tc["pnl"] += net
+        tc["trade"] = None
+        tg.send(alerts.exit_msg(t, net))
+
+    def tc_open(direction, line, spot_now, now):
+        atm = round(spot_now / C.STRIKE_STEP) * C.STRIKE_STEP
+        inst = chain.get((float(atm), direction))
+        if not inst:
+            log.warning("Supertrend TOUCH: no %s option at %s", direction, atm)
+            return
+        key = f"NFO:{inst['tradingsymbol']}"
+        q = m.quote([key])
+        bid, ask, ltp = best_prices(q[key])
+        t = book.open(direction=direction, symbol=inst["tradingsymbol"], lot_size=lot_size, lots=C.LOTS,
+                      entry_time=now, entry_spot=spot_now, entry_premium=buy_price(ask, ltp),
+                      sl_spot=line, target_spot=0.0, setup="st_touch", level=round(line, 1), score=tc["touches"],
+                      reasons=f"touch #{tc['touches']} of 5-min Supertrend({STM.TOUCH_PERIOD},{STM.TOUCH_MULT:g}) "
+                              f"line {line:.1f}; exit on 5-min close beyond the line")
+        tc["trade"] = t
+        tc["n"] += 1
+        tg.send(alerts.touch_entry_msg(t, line, tc["touches"]))
+
     try:
         while True:
             now = clock.now()
@@ -340,7 +376,25 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
                     st_close(f"trailing stop ({locked:+.0f} pts locked)" if locked > -STM.ST_STOP_POINTS
                              else f"stop-loss (-{STM.ST_STOP_POINTS} pts)")
 
+            # ---- Supertrend TOUCH: enter the moment NIFTY reaches the line (checked every loop) ----
+            if (STM.TOUCH_ENABLED and tc["armed"] and tc["trade"] is None and tc["line"] is not None
+                    and tc_start_t <= now <= tc_last_t):
+                up = tc["dir"] == 1
+                if (spot <= tc["line"] + STM.TOUCH_NEAR) if up else (spot >= tc["line"] - STM.TOUCH_NEAR):
+                    tc["armed"] = False
+                    tc["touches"] += 1
+                    if tc["touches"] <= STM.TOUCH_MAX_PER_TREND and tc["n"] < STM.TOUCH_MAX_TRADES:
+                        try:
+                            tc_open("CE" if up else "PE", tc["line"], spot, now)
+                        except Exception as e:
+                            log.warning("Supertrend TOUCH entry failed: %s", e)
+                    else:
+                        log.info("Supertrend TOUCH #%d at %.1f - skipped (only touch #1-#%d, max %d/day)",
+                                 tc["touches"], tc["line"], STM.TOUCH_MAX_PER_TREND, STM.TOUCH_MAX_TRADES)
+
             if now >= exit_t or os.path.exists("STOP"):
+                if tc["trade"]:
+                    tc_close("time exit" if now >= exit_t else "manual STOP")
                 if st["trade"]:
                     st_close("time exit" if now >= exit_t else "manual STOP")
                 log.info("Stopping: %s", "exit time" if now >= exit_t else "STOP file found")
@@ -410,6 +464,22 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
                         if (st["trade"] is None and d_now is not None and (fresh or first)
                                 and st_start_t <= now <= st_last_t):
                             st_open("CE" if d_now == 1 else "PE", line, now)
+                    # ---- Supertrend TOUCH: update the line at each 5-min close ----
+                    if STM.TOUCH_ENABLED:
+                        allc = st_hist + candles
+                        dirs, lines = STM.compute(allc, STM.TOUCH_PERIOD, STM.TOUCH_MULT)
+                        d_t, l_t = dirs[-1], lines[-1]
+                        last = candles[-1]
+                        if tc["trade"]:
+                            held = 1 if tc["trade"].direction == "CE" else -1
+                            if d_t != held or (last["close"] < l_t if held == 1 else last["close"] > l_t):
+                                tc_close("5-min close beyond the Supertrend line")
+                        if d_t != tc["dir"]:
+                            tc["touches"] = 0             # new colour -> count touches from zero
+                        tc["dir"], tc["line"] = d_t, l_t
+                        # armed only if this candle stayed away from the line (a fresh pullback is needed)
+                        tc["armed"] = d_t is not None and (
+                            last["low"] > l_t + STM.TOUCH_NEAR if d_t == 1 else last["high"] < l_t - STM.TOUCH_NEAR)
 
             clock.sleep(C.LOOP_SECONDS)
 
@@ -422,6 +492,8 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
             closed(trade)
         if st["trade"]:
             st_close("manual Ctrl+C")
+        if tc["trade"]:
+            tc_close("manual Ctrl+C")
 
     # save today's candles for future backtesting
     try:
@@ -433,10 +505,11 @@ def run(kite, clock, out_dir="logs", data_dir="data", tg=None):
                 w.writerow([c["time"].strftime("%H:%M"), c["open"], c["high"], c["low"], c["close"]])
     except Exception as e:
         log.warning("Could not save candles: %s", e)
-    log.info("Day finished. Paper P&L today: Rs %.0f (price-action Rs %.0f, Supertrend Rs %.0f)",
-             day.pnl + st["pnl"], day.pnl, st["pnl"])
-    tg.send(alerts.summary_msg(today, day.trades + st["n"], day.pnl + st["pnl"])
-            + f"\nSupertrend: {st['n']} trades, Rs {st['pnl']:+,.0f}")
+    log.info("Day finished. Paper P&L today: Rs %.0f (price-action Rs %.0f, Supertrend Rs %.0f, "
+             "ST touch Rs %.0f)", day.pnl + st["pnl"] + tc["pnl"], day.pnl, st["pnl"], tc["pnl"])
+    tg.send(alerts.summary_msg(today, day.trades + st["n"] + tc["n"], day.pnl + st["pnl"] + tc["pnl"])
+            + f"\nSupertrend: {st['n']} trades, Rs {st['pnl']:+,.0f}"
+            + f"\nST touch: {tc['n']} trades, Rs {tc['pnl']:+,.0f}")
     tg.flush()
     report(f"{out_dir}/trades.csv", today.isoformat())
 

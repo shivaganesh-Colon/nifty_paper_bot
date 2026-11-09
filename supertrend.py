@@ -37,11 +37,28 @@ ST_STOP_POINTS = getattr(C, "ST_STOP_POINTS", 60)
 # When the trailing stop moves: "candle" = at each 5-min close (default, suits wide trails),
 # "tick" = continuously as the price moves (needed for tight trails like 5 pts).
 ST_TRAIL_MODE = getattr(C, "ST_TRAIL_MODE", "candle")
+# Re-entry: after a trade exits while Supertrend keeps the same colour, enter again in the
+# same direction when a 5-min candle closes beyond the previous candle's low (red) / high (green).
+ST_REENTRY = getattr(C, "ST_REENTRY", False)
+ST_MAX_REENTRY = getattr(C, "ST_MAX_REENTRY", 2)      # max re-entries per Supertrend colour
 # First trade at 9:20 follows the current colour (False = only trade fresh flips)
 ST_FIRST_TRADE = getattr(C, "ST_FIRST_TRADE", True)
 ST_START = getattr(C, "ST_START", "09:20")       # first entry (first 5-min candle closed)
 ST_LAST_ENTRY = getattr(C, "ST_LAST_ENTRY", "15:00")
 ST_WARMUP_DAYS = getattr(C, "ST_WARMUP_DAYS", 10)  # past days loaded so the line is ready at 9:20
+
+# ---- "Supertrend TOUCH" paper setup (tested on 3 years of 1-min data, 9 Nov 2026) ----
+# Price pulls back to the 5-min Supertrend(10,3) line -> buy in the Supertrend direction
+# (CE when green, PE when red). Exit only when a 5-min candle CLOSES beyond the line.
+# 3-year test, entries before 12:00: 603 trades, win 26%, avg +10 NIFTY pts after costs.
+TOUCH_ENABLED = getattr(C, "TOUCH_ENABLED", True)
+TOUCH_PERIOD = getattr(C, "TOUCH_PERIOD", 10)
+TOUCH_MULT = getattr(C, "TOUCH_MULT", 3.0)
+TOUCH_NEAR = getattr(C, "TOUCH_NEAR", 5)             # "touch" = NIFTY within 5 pts of the line
+TOUCH_START = getattr(C, "TOUCH_START", "09:20")
+TOUCH_LAST_ENTRY = getattr(C, "TOUCH_LAST_ENTRY", "12:00")   # afternoon lost money in the test
+TOUCH_MAX_PER_TREND = getattr(C, "TOUCH_MAX_PER_TREND", 2)   # only 1st and 2nd touch of each colour
+TOUCH_MAX_TRADES = getattr(C, "TOUCH_MAX_TRADES", 4)         # per day
 
 
 def compute(candles, period=None, mult=None):

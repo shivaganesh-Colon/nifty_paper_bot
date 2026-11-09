@@ -137,6 +137,7 @@ class Flow:
         self.on_guess = None    # callback(row) for each scored guess  (csv logging)
         self.on_signal = None   # callback(signal dict) when a signal finishes
         self.spot = None        # latest NIFTY spot (set by the recorder) -> premium
+        self.pivots = {}        # spot pivots {name: level} - shown in alerts only, not used for signals
         self.last_explosive = {}  # side -> time of last explosive candle
 
     # ---------------------------------------------------------------- helpers
@@ -515,11 +516,36 @@ class Flow:
         cicon = "🟩 GREEN" if c > o else "🟥 RED" if c < o else "⬜ DOJI"
         who = ("Delta: BUYERS stronger" if d > 0 else "Delta: SELLERS stronger" if d < 0 else "Delta: balanced")
         spot = (f" | spot ≈ {c - self.basis:,.1f} (premium {self.basis:+.1f})" if self.basis is not None else "")
+        nxt = self._next_levels(c)
         return (f"🕯 {t}  {cicon} candle ({c - o:+.1f} pts)  {self.symbol}\n"
                 f"FUT O {o:,.1f}  H {h:,.1f}  L {l:,.1f}  C {c:,.1f}{spot}\n"
                 f"Sell {_k(sell)} | Buy {_k(buy)} | Delta {d:+,}\n"
-                f"Cum Δ {cum:+,} ({trend})\n{who}{ratio}{agree}"
+                f"Cum Δ {cum:+,} ({trend})\n{who}{ratio}{agree}{nxt}"
                 + ("\n" + "\n".join(lines) if lines else ""))
+
+    def _next_levels(self, c):
+        """'Next support / resistance' line in SPOT terms (pivots + prev-day levels + profile)."""
+        if self.basis is None:
+            return ""
+        s = c - self.basis
+        lv = [(v, f"Pivot {k}") for k, v in self.pivots.items()]
+        lv += [(p - self.basis, n) for p, n in self.static]
+        poc, val, vah = value_area(self.profile)
+        if poc is not None and len(self.hist) >= 15:
+            lv += [(poc - self.basis, "Today POC"), (val - self.basis, "Today VAL"), (vah - self.basis, "Today VAH")]
+        below = [x for x in lv if x[0] < s - 2]
+        above = [x for x in lv if x[0] > s + 2]
+        parts = []
+        if below:
+            v, n = max(below)
+            parts.append(f"⬇️ support {n} {v:,.0f} ({v - s:+.0f})")
+        if above:
+            v, n = min(above)
+            parts.append(f"⬆️ resistance {n} {v:,.0f} ({v - s:+.0f})")
+        side = ""
+        if "P" in self.pivots:
+            side = " | " + ("above P = CE side" if s > self.pivots["P"] else "below P = PE side")
+        return ("\n🗺 " + " | ".join(parts) + side) if parts else ""
 
     def close_open_signal(self, t, c):
         """End of day: close a still-open signal at the last price."""

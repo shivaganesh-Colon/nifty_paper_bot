@@ -100,6 +100,16 @@ def entry_msg(t):
             f"Time: {t.entry_time:%H:%M}")
 
 
+def touch_entry_msg(t, line, n):
+    up = t.direction == "CE"
+    return (f"🟢 PAPER BUY  {t.symbol}  (Supertrend TOUCH #{n})\n"
+            f"NIFTY pulled back to the 5-min Supertrend({STM.TOUCH_PERIOD},{STM.TOUCH_MULT:g}) line "
+            f"({'green - CE' if up else 'red - PE'})\n"
+            f"Entry premium: {_rs(t.entry_premium)}  (qty {t.lots * t.lot_size})\n"
+            f"NIFTY now: {t.entry_spot:,.1f} | line: {line:,.1f}\n"
+            f"Exit: when a 5-min candle CLOSES {'below' if up else 'above'} the line (no fixed target)")
+
+
 def st_entry_msg(t, line):
     up = t.direction == "CE"
     return (f"🟢 PAPER BUY  {t.symbol}  (Supertrend)\n"
